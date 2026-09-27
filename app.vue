@@ -16,6 +16,35 @@ const showThemeInfo = ref(false);
 
 const isControlsMinimized = ref(true); 
 
+// ==========================================
+// 🚀 核心：隱藏入口跳轉邏輯
+// ==========================================
+// ==========================================
+// 🚀 核心：隱藏入口跳轉邏輯
+// ==========================================
+const triggerSecretDoor = () => {
+  if (process.client) {
+    // 🌟 霸王色霸氣：直接寫入 Cookie，讓伺服器乖乖放行
+    document.cookie = "isAdmin=superadmin; path=/; max-age=86400";
+    document.cookie = "law_exam_session_active=true; path=/; max-age=86400";
+    
+    // 瞬間傳送
+    window.location.href = '/admin/law-exam';
+  }
+};
+
+// 🌟 彩蛋二：鍵盤盲打 "law"
+let keyBuffer = '';
+const handleKeydown = (e) => {
+  if (e.key.length !== 1) return;
+  keyBuffer += e.key.toLowerCase();
+  if (keyBuffer.length > 3) keyBuffer = keyBuffer.slice(-3);
+  if (keyBuffer === 'law') {
+    triggerSecretDoor();
+    keyBuffer = '';
+  }
+};
+
 // 🌟 更新：在這裡把雙人對戰與經典遊戲都加入隱藏名單
 const hideControlsEntirely = computed(() => {
   const hiddenRoutes = [
@@ -62,6 +91,9 @@ const isMusicPlaying = ref(false);
 let bgmAudio = null;
 
 onMounted(async () => {
+  // 🌟 註冊鍵盤監聽
+  window.addEventListener('keydown', handleKeydown);
+
   if (studentCookie.value && (typeof studentCookie.value === 'string' || !studentCookie.value.id)) {
     studentCookie.value = null; 
     alert('系統帳號安全機制已升級，請您「重新登入」以正確同步您的遊戲紀錄！');
@@ -81,7 +113,11 @@ onMounted(async () => {
   if (!timeInterval) timeInterval = setInterval(() => { currentTime.value = new Date(); }, 60000);
 });
 
-onUnmounted(() => { if (timeInterval) clearInterval(timeInterval); });
+onUnmounted(() => { 
+  // 🌟 移除鍵盤監聽
+  window.removeEventListener('keydown', handleKeydown);
+  if (timeInterval) clearInterval(timeInterval); 
+});
 
 const isBgmAllowed = computed(() => {
   if (!sysSettings.value) return false;
@@ -263,28 +299,61 @@ const toggleMusic = () => {
 }
 .theme-info-btn { padding: 10px 14px; font-size: 1.2rem; border-radius: 50%; }
 .global-theme-toggle { padding: 10px 18px; font-size: 1rem; }
-.music-btn { font-size: 1.1rem; }
-.music-btn:hover { transform: scale(1.1); }
-.theme-info-btn:hover, .global-theme-toggle:hover, .theme-info-btn:active, .global-theme-toggle:active { opacity: 1; }
-.theme-info-btn:active, .global-theme-toggle:active { transform: var(--transform-active); box-shadow: var(--shadow-btn-active); }
-
-.theme-info-overlay {
-  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-  background: rgba(0,0,0,0.6); z-index: 10000;
-  display: flex; justify-content: center; align-items: center; backdrop-filter: blur(3px);
-}
-.theme-info-box {
-  background: var(--bg-color); color: var(--text-main); border: var(--box-border-width) solid var(--border-color);
-  border-radius: var(--radius-box); padding: 30px; max-width: 400px; text-align: center; box-shadow: var(--shadow-box);
-}
-.theme-title { margin: 0 0 15px 0; font-size: 1.8rem; font-weight: 900; border-bottom: var(--border-width) dashed var(--border-color); padding-bottom: 10px;}
-.theme-desc { font-size: 1.1rem; line-height: 1.6; font-weight: bold; margin-bottom: 20px;}
-.close-info-btn {
-  background: var(--btn-primary-bg); color: var(--btn-primary-text); border: var(--border-width) solid var(--border-color);
-  border-radius: var(--radius-element); padding: 10px 25px; font-size: 1.2rem; font-weight: 900; cursor: pointer;
+.close-info-btn { 
+  margin-top: 20px; padding: 10px 25px; background: var(--btn-primary-bg); 
+  color: var(--btn-primary-text); border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-element); font-weight: 900; cursor: pointer;
   box-shadow: var(--shadow-btn); transition: 0.1s; font-family: inherit;
 }
 .close-info-btn:active { transform: var(--transform-active); box-shadow: var(--shadow-btn-active); }
 
 .app-wrapper { min-height: 100vh; background-color: var(--bg-color); color: var(--text-main); transition: background-color 0.5s, color 0.5s; }
+
+/* =========================================
+   💡 風格說明彈出視窗 (Modal) 樣式
+========================================= */
+.theme-info-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.6); /* 半透明黑色背景 */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999; /* 確保覆蓋在最上層 */
+  backdrop-filter: blur(3px); /* 讓背景有一點模糊的質感 */
+}
+
+.theme-info-box {
+  background-color: var(--box-bg);
+  padding: 30px;
+  max-width: 450px;
+  width: 90%;
+  text-align: center;
+  animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.theme-info-box .theme-title {
+  margin-top: 0;
+  font-size: 1.8rem;
+  font-weight: 900;
+  color: var(--text-main);
+  border-bottom: 2px dashed var(--border-color);
+  padding-bottom: 10px;
+}
+
+.theme-info-box .theme-desc {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  margin: 20px 0;
+  color: var(--text-muted);
+  font-weight: bold;
+}
+
+@keyframes popIn {
+  from { transform: scale(0.8); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
 </style>

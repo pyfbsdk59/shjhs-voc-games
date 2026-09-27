@@ -1,378 +1,293 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
-import Papa from 'papaparse';
-
+import { ref, onMounted } from 'vue';
 definePageMeta({ middleware: ['auth', 'law-auth'] });
-
 const supabase = useSupabaseClient();
-const questions = ref([]);
-const isLoading = ref(true);
-const showEditModal = ref(false);
-const isUploading = ref(false);
 
-const selectedSubject = ref('ALL');
-const selectedYear = ref('ALL');
+// 🌟 動態科目的狀態管理
+const customCourses = ref([]);
+const showCourseForm = ref(false);
+const editingId = ref(null);
+const courseForm = ref({ subject: '', icon: '📖', theme_color: '#3b82f6' });
 
-// 🌟 新增：批次選取的 ID 陣列
-const selectedIds = ref([]);
-
-const editingQ = ref({
-  subject: '', exam_year: '', question_text: '',
-  opt_a: '', opt_b: '', opt_c: '', opt_d: '', answer: 'A',
-  exp_a_text: '', exp_a_url: '', exp_b_text: '', exp_b_url: '',
-  exp_c_text: '', exp_c_url: '', exp_d_text: '', exp_d_url: ''
-});
-
-const fetchQuestions = async () => {
-  isLoading.value = true;
-  const { data } = await supabase.from('law_exam_questions').select('*').order('created_at', { ascending: false });
-  if (data) questions.value = data;
-  isLoading.value = false;
-  selectedIds.value = []; // 重新載入時清空選取
+// 載入自訂科目
+const fetchCustomCourses = async () => {
+  const { data } = await supabase.from('custom_courses').select('*').order('created_at', { ascending: true });
+  if (data) customCourses.value = data;
 };
 
-onMounted(fetchQuestions);
+onMounted(fetchCustomCourses);
 
-const subjects = computed(() => ['ALL', ...new Set(questions.value.map(q => q.subject))]);
-const years = computed(() => ['ALL', ...new Set(questions.value.map(q => q.exam_year))]);
-
-const filteredQuestions = computed(() => {
-  return questions.value.filter(q => {
-    const matchSubject = selectedSubject.value === 'ALL' || q.subject === selectedSubject.value;
-    const matchYear = selectedYear.value === 'ALL' || q.exam_year === selectedYear.value;
-    return matchSubject && matchYear;
-  });
-});
-
-// 🌟 新增：全選邏輯
-const isAllSelected = computed(() => {
-  return filteredQuestions.value.length > 0 && 
-         filteredQuestions.value.every(q => selectedIds.value.includes(q.id));
-});
-
-const toggleSelectAll = () => {
-  if (isAllSelected.value) {
-    // 如果已經全選，則清空目前畫面上有顯示的項目
-    const filteredIds = filteredQuestions.value.map(q => q.id);
-    selectedIds.value = selectedIds.value.filter(id => !filteredIds.includes(id));
-  } else {
-    // 否則，將目前畫面上過濾出來的項目全部加入選取
-    const newSelections = filteredQuestions.value.map(q => q.id);
-    selectedIds.value = [...new Set([...selectedIds.value, ...newSelections])];
-  }
+// 開啟新增表單
+const openAddForm = () => {
+  editingId.value = null;
+  courseForm.value = { subject: '', icon: '📖', theme_color: '#3b82f6' };
+  showCourseForm.value = true;
 };
 
-const toggleSelection = (id) => {
-  if (selectedIds.value.includes(id)) {
-    selectedIds.value = selectedIds.value.filter(i => i !== id);
-  } else {
-    selectedIds.value.push(id);
-  }
+// 開啟編輯表單
+const editCourse = (course) => {
+  editingId.value = course.id;
+  courseForm.value = { subject: course.subject, icon: course.icon, theme_color: course.theme_color };
+  showCourseForm.value = true;
 };
 
-const openEditModal = (q = null) => {
-  if (q) editingQ.value = { ...q };
-  else {
-    editingQ.value = {
-      subject: '', exam_year: '', question_text: '',
-      opt_a: '', opt_b: '', opt_c: '', opt_d: '', answer: 'A',
-      exp_a_text: '', exp_a_url: '', exp_b_text: '', exp_b_url: '',
-      exp_c_text: '', exp_c_url: '', exp_d_text: '', exp_d_url: ''
-    };
-  }
-  showEditModal.value = true;
-};
-
-const saveQuestion = async () => {
-  const { id, ...payload } = editingQ.value;
-  let error;
-  if (id) ({ error } = await supabase.from('law_exam_questions').update(payload).eq('id', id));
-  else ({ error } = await supabase.from('law_exam_questions').insert([payload]));
-
-  if (error) alert('儲存失敗: ' + error.message);
-  else { showEditModal.value = false; fetchQuestions(); }
-};
-
-const deleteQuestion = async (id) => {
-  if (!confirm('確定要刪除這道題目嗎？此動作無法復原。')) return;
-  const { error } = await supabase.from('law_exam_questions').delete().eq('id', id);
-  if (error) alert('刪除失敗: ' + error.message);
-  else fetchQuestions();
-};
-
-// 🌟 新增：批次刪除邏輯
-const batchDelete = async () => {
-  if (selectedIds.value.length === 0) return;
-  if (!confirm(`確定要刪除選取的 ${selectedIds.value.length} 道題目嗎？此動作無法復原。`)) return;
+// 儲存（包含新增與修改）
+const saveCourse = async () => {
+  if (!courseForm.value.subject.trim()) return alert('請輸入科目名稱！');
   
-  const { error } = await supabase.from('law_exam_questions').delete().in('id', selectedIds.value);
-  if (error) alert('批次刪除失敗: ' + error.message);
-  else fetchQuestions();
-};
-
-const handleImport = (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  isUploading.value = true;
-  Papa.parse(file, {
-    header: true, skipEmptyLines: true,
-    complete: async (results) => {
-      const mappedData = results.data.map(row => ({
-        subject: row['科目'], exam_year: row['年份'], question_text: row['題目'],
-        opt_a: row['選項A'], opt_b: row['選項B'], opt_c: row['選項C'], opt_d: row['選項D'],
-        answer: row['正確答案'],
-        exp_a_text: row['詳解A文字'], exp_a_url: row['詳解A網址'],
-        exp_b_text: row['詳解B文字'], exp_b_url: row['詳解B網址'],
-        exp_c_text: row['詳解C文字'], exp_c_url: row['詳解C網址'],
-        exp_d_text: row['詳解D文字'], exp_d_url: row['詳解D網址']
-      }));
-      const { error } = await supabase.from('law_exam_questions').insert(mappedData);
-      if (error) alert('匯入失敗: ' + error.message);
-      else { alert(`成功匯入 ${mappedData.length} 筆題目！`); fetchQuestions(); }
-      isUploading.value = false; e.target.value = ''; 
+  if (editingId.value) {
+    // ⚠️ 檢查是否有改名，若有改名，連帶更新筆記庫裡面的科目名稱，避免筆記變成孤兒
+    const oldCourse = customCourses.value.find(c => c.id === editingId.value);
+    if (oldCourse && oldCourse.subject !== courseForm.value.subject) {
+      await supabase.from('course_notes').update({ subject: courseForm.value.subject }).eq('subject', oldCourse.subject);
     }
-  });
+    
+    // 更新科目表
+    const { error } = await supabase.from('custom_courses').update({
+      subject: courseForm.value.subject,
+      icon: courseForm.value.icon,
+      theme_color: courseForm.value.theme_color
+    }).eq('id', editingId.value);
+    
+    if (error) return alert('更新失敗：' + error.message);
+    alert('✅ 科目已更新！');
+  } else {
+    // 新增模式
+    const { error } = await supabase.from('custom_courses').insert([courseForm.value]);
+    if (error) {
+      if (error.code === '23505') return alert('這個科目名稱已經存在囉！');
+      return alert('新增失敗：' + error.message);
+    }
+    alert('✅ 新科目建立成功！');
+  }
+  
+  showCourseForm.value = false;
+  fetchCustomCourses();
 };
 
-const exportCSV = () => {
-  // 🌟 修改：如果有選取題目，就只匯出選取的；否則匯出畫面上過濾出來的
-  let targetQuestions = [];
-  if (selectedIds.value.length > 0) {
-    targetQuestions = questions.value.filter(q => selectedIds.value.includes(q.id));
-  } else {
-    targetQuestions = filteredQuestions.value;
-  }
-
-  if (targetQuestions.length === 0) return alert('目前沒有題目可以匯出');
-
-  const exportData = targetQuestions.map(q => ({
-    '科目': q.subject, '年份': q.exam_year, '題目': q.question_text,
-    '選項A': q.opt_a, '選項B': q.opt_b, '選項C': q.opt_c, '選項D': q.opt_d,
-    '正確答案': q.answer,
-    '詳解A文字': q.exp_a_text, '詳解A網址': q.exp_a_url,
-    '詳解B文字': q.exp_b_text, '詳解B網址': q.exp_b_url,
-    '詳解C文字': q.exp_c_text, '詳解C網址': q.exp_c_url,
-    '詳解D文字': q.exp_d_text, '詳解D網址': q.exp_d_url,
-  }));
-  const csv = Papa.unparse(exportData);
-  const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = `law_questions_${new Date().toISOString().slice(0, 10)}.csv`;
-  link.click();
+// 刪除科目
+const deleteCourse = async (id, subject) => {
+  if (!confirm(`確定要刪除「${subject}」這個專區嗎？\n\n(注意：這只會移除專區入口，不會刪除您在此科目建立的筆記資料，以免誤刪)`)) return;
+  const { error } = await supabase.from('custom_courses').delete().eq('id', id);
+  if (error) return alert('刪除失敗：' + error.message);
+  fetchCustomCourses();
 };
 </script>
 
 <template>
-  <div class="law-admin-container">
-    <div class="header-section">
-      <div class="title-area">
-        <h1>司律題庫管理</h1>
-        <p>管理法律考試題目、選項與詳細解析</p>
-      </div>
-      <div class="action-buttons">
-        <NuxtLink to="/admin/law-exam/practice" class="btn btn-primary">🎯 開始刷題</NuxtLink>
-        <label class="btn btn-warning" :class="{ disabled: isUploading }">
-          <span v-if="isUploading">⏳ 處理中...</span>
-          <span v-else>📥 匯入</span>
-          <input type="file" accept=".csv" @change="handleImport" :disabled="isUploading" style="display:none;" />
-        </label>
-        <button @click="exportCSV" class="btn btn-success">📤 匯出</button>
-        <button @click="batchDelete" class="btn btn-danger" v-if="selectedIds.length > 0">
-          🗑️ 刪除選取 ({{ selectedIds.length }})
-        </button>
-        <button @click="openEditModal()" class="btn btn-dark">＋ 新增題目</button>
+  <div class="dashboard-container">
+    <div class="header">
+      <NuxtLink to="/admin" class="back-btn">← 回網站主後台</NuxtLink>
+      <h1>⚖️ 司律考試專區</h1>
+      <p>個人專屬題庫與法典學習系統</p>
+    </div>
+
+    <div class="cards-grid">
+      <NuxtLink to="/admin/law-exam/practice" class="dash-card practice-card">
+        <div class="icon">🎯</div><h2>開始刷題練習</h2>
+      </NuxtLink>
+      <NuxtLink to="/admin/law-exam/manage" class="dash-card manage-card">
+        <div class="icon">📚</div><h2>題庫與解析管理</h2>
+      </NuxtLink>
+    </div>
+
+    <hr class="section-divider" />
+
+    <h3 class="section-title">🏢 地政士考試專區 <span style="font-size:14px; color:#64748b; font-weight:normal;">(不限講數，自由新增)</span></h3>
+    <div class="cards-grid course-grid">
+      <NuxtLink to="/admin/law-exam/land-registration-rule-course" class="dash-card course-card emerald-theme">
+        <div class="icon">📜</div><div class="course-info"><span class="course-tag tag-emerald">地政士</span><h2>土地登記規則</h2></div>
+      </NuxtLink>
+      <NuxtLink to="/admin/law-exam/land-law-course" class="dash-card course-card amber-theme">
+        <div class="icon">🏞️</div><div class="course-info"><span class="course-tag tag-amber">地政士</span><h2>土地法規</h2></div>
+      </NuxtLink>
+      <NuxtLink to="/admin/law-exam/land-tax-law-course" class="dash-card course-card rose-theme">
+        <div class="icon">💰</div><div class="course-info"><span class="course-tag tag-rose">地政士</span><h2>土地稅法</h2></div>
+      </NuxtLink>
+      <NuxtLink to="/admin/law-exam/civil-and-trust-law-course" class="dash-card course-card indigo-theme">
+        <div class="icon">🤝</div><div class="course-info"><span class="course-tag tag-indigo">地政士</span><h2>民法與信託法</h2></div>
+      </NuxtLink>
+    </div>
+
+    <hr class="section-divider" />
+
+    <h3 class="section-title">🎓 學分班筆記專區</h3>
+    <div class="cards-grid course-grid">
+      <NuxtLink to="/admin/law-exam/civil-course" class="dash-card course-card civil-theme"><div class="icon">📘</div><div class="course-info"><span class="course-tag tag-civil">學分班</span><h2>民法 55 堂課</h2></div></NuxtLink>
+      <NuxtLink to="/admin/law-exam/criminal-course" class="dash-card course-card criminal-theme"><div class="icon">📕</div><div class="course-info"><span class="course-tag tag-criminal">學分班</span><h2>刑法 55 堂課</h2></div></NuxtLink>
+      <NuxtLink to="/admin/law-exam/administrative-course" class="dash-card course-card admin-theme"><div class="icon">📓</div><div class="course-info"><span class="course-tag tag-admin">學分班</span><h2>行政法 55 堂課</h2></div></NuxtLink>
+      <NuxtLink to="/admin/law-exam/civil-procedure-course" class="dash-card course-card cp-theme"><div class="icon">📙</div><div class="course-info"><span class="course-tag tag-cp">學分班</span><h2>民訴法 55 堂課</h2></div></NuxtLink>
+      <NuxtLink to="/admin/law-exam/criminal-procedure-course" class="dash-card course-card crp-theme"><div class="icon">📗</div><div class="course-info"><span class="course-tag tag-crp">學分班</span><h2>刑訴法 55 堂課</h2></div></NuxtLink>
+      <NuxtLink to="/admin/law-exam/commercial-course" class="dash-card course-card comm-theme"><div class="icon">💼</div><div class="course-info"><span class="course-tag tag-comm">學分班</span><h2>商事法 55 堂課</h2></div></NuxtLink>
+      <NuxtLink to="/admin/law-exam/ip-course" class="dash-card course-card ip-theme"><div class="icon">💡</div><div class="course-info"><span class="course-tag tag-ip">學分班</span><h2>智財法 55 堂課</h2></div></NuxtLink>
+    </div>
+
+    <hr class="section-divider" />
+
+    <h3 class="section-title">🏛️ 基礎法學專區</h3>
+    <div class="cards-grid">
+      <NuxtLink to="/admin/law-exam/constitutional-law" class="dash-card law-violet"><div class="icon">👑</div><h2>憲法典籍</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/civil-law" class="dash-card law-indigo"><div class="icon">🏛️</div><h2>民法典籍</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/criminal-law" class="dash-card law-rose"><div class="icon">⚖️</div><h2>刑法典籍</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/civil-procedure-law" class="dash-card law-amber"><div class="icon">📜</div><h2>民事訴訟法</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/criminal-procedure-law" class="dash-card law-emerald"><div class="icon">🚔</div><h2>刑事訴訟法</h2></NuxtLink>
+    </div>
+
+    <hr class="section-divider" />
+
+    <h3 class="section-title">🏛️ 行政法與公務員法專區</h3>
+    <div class="cards-grid">
+      <NuxtLink to="/admin/law-exam/administrative-procedure-act" class="dash-card law-gray"><div class="icon">⚙️</div><h2>行政程序法</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/administrative-litigation-act" class="dash-card law-deep-purple"><div class="icon">🏛️</div><h2>行政訴訟法</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/state-compensation-law" class="dash-card law-rust"><div class="icon">💰</div><h2>國家賠償法</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/public-servants-service-act" class="dash-card law-marine"><div class="icon">👔</div><h2>公務員服務法</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/public-servants-protection-act" class="dash-card law-forest"><div class="icon">🛡️</div><h2>公務人員保障法</h2></NuxtLink>
+    </div>
+
+    <hr class="section-divider" />
+
+    <h3 class="section-title">🎓 教育法規專區</h3>
+    <div class="cards-grid">
+      <NuxtLink to="/admin/law-exam/educational-fundamental-act" class="dash-card law-teal"><div class="icon">📖</div><h2>教育基本法</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/teachers-act" class="dash-card law-cyan"><div class="icon">🧑‍🏫</div><h2>教師法</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/teachers-act-enforcement-rules" class="dash-card law-sky"><div class="icon">📋</div><h2>教師法施行細則</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/campus-bullying-prevention-guidelines" class="dash-card law-orange"><div class="icon">🛑</div><h2>校園霸凌防制準則</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/teachers-dismissal-regulations" class="dash-card law-pink"><div class="icon">🚫</div><h2>解聘不續聘辦法</h2></NuxtLink>
+    </div>
+
+    <hr class="section-divider" />
+
+    <h3 class="section-title">📚 教育與兒少進階法規</h3>
+    <div class="cards-grid">
+      <NuxtLink to="/admin/law-exam/educational-personnel-employment-act" class="dash-card law-teal"><div class="icon">🧑‍💼</div><h2>教育人員任用條例</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/educational-personnel-employment-act-rules" class="dash-card law-cyan"><div class="icon">📄</div><h2>任用條例施行細則</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/teachers-leave-regulations" class="dash-card law-pink"><div class="icon">🏖️</div><h2>教師請假規則</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/children-and-youth-welfare-act" class="dash-card law-amber"><div class="icon">👶</div><h2>兒少權益保障法</h2></NuxtLink>
+      <NuxtLink to="/admin/law-exam/tainan-tutoring-guidelines" class="dash-card law-gray"><div class="icon">🏫</div><h2>臺南市課輔實施要點</h2></NuxtLink>
+    </div>
+
+    <hr class="section-divider" />
+
+    <!-- 🌟 全新的高空大 法律校外班專區 (全動態) -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+      <h3 class="section-title" style="margin-bottom: 0;">🏛️ 高空大 法律校外班 <span style="font-size:14px; color:#64748b; font-weight:normal;">(不限科目，自由新增)</span></h3>
+      <button @click="showCourseForm ? (showCourseForm = false) : openAddForm()" class="btn-toggle-add">
+        {{ showCourseForm ? '取消設定' : '➕ 建立新科目' }}
+      </button>
+    </div>
+
+    <!-- ✏️ 動態新增/編輯科目的表單 -->
+    <div v-if="showCourseForm" class="add-course-panel">
+      <h4 style="margin: 0 0 15px 0; color: #334155;">{{ editingId ? '✏️ 編輯科目外觀' : '✨ 建立新科目' }}</h4>
+      <div class="add-grid">
+        <div><label>科目名稱</label><input v-model="courseForm.subject" placeholder="例如：社會學" class="add-input" /></div>
+        <div><label>Emoji 圖示</label><input v-model="courseForm.icon" placeholder="🧑‍🤝‍🧑" class="add-input" /></div>
+        <div><label>主題代表色</label><input type="color" v-model="courseForm.theme_color" class="color-picker" /></div>
+        <div style="display: flex; align-items: flex-end;"><button @click="saveCourse" class="btn-confirm-add">{{ editingId ? '💾 儲存變更' : '💾 建立科目' }}</button></div>
       </div>
     </div>
 
-    <div class="filter-bar" v-if="questions.length > 0">
-      <label class="checkbox-container select-all-btn">
-        <input type="checkbox" :checked="isAllSelected" @change="toggleSelectAll" />
-        <span class="checkmark"></span>
-        全選目前篩選題目
-      </label>
-
-      <div class="filter-item">
-        <label>科目：</label>
-        <select v-model="selectedSubject" class="styled-select">
-          <option v-for="s in subjects" :key="s" :value="s">{{ s === 'ALL' ? '全部' : s }}</option>
-        </select>
-      </div>
-      <div class="filter-item">
-        <label>年份：</label>
-        <select v-model="selectedYear" class="styled-select">
-          <option v-for="y in years" :key="y" :value="y">{{ y === 'ALL' ? '全部' : y }}</option>
-        </select>
-      </div>
-      <div class="filter-info">
-        共 {{ filteredQuestions.length }} 題
-      </div>
-    </div>
-
-    <div class="question-list">
-      <div v-if="isLoading" class="loading-msg">資料載入中...</div>
-      <div v-else-if="questions.length === 0" class="empty-msg">目前題庫為空，請點擊上方按鈕新增或匯入題目。</div>
-      <div v-else-if="filteredQuestions.length === 0" class="empty-msg">找不到符合該篩選條件的題目。</div>
+    <div class="cards-grid course-grid">
+      <!-- 靜態卡片 -->
+      <NuxtLink to="/admin/law-exam/legal-methodology-course" class="dash-card course-card cyan-theme">
+        <div class="icon">🧭</div><div class="course-info"><span class="course-tag tag-cyan">校外班</span><h2>法學方法論</h2></div>
+      </NuxtLink>
+      <NuxtLink to="/admin/law-exam/political-science-course" class="dash-card course-card violet-theme">
+        <div class="icon">🏛️</div><div class="course-info"><span class="course-tag tag-violet">校外班</span><h2>政治學</h2></div>
+      </NuxtLink>
       
-      <div v-else v-for="q in filteredQuestions" :key="q.id" class="q-card" :class="{ 'is-selected': selectedIds.includes(q.id) }">
-        
-        <label class="checkbox-container item-checkbox">
-          <input type="checkbox" :checked="selectedIds.includes(q.id)" @change="toggleSelection(q.id)" />
-          <span class="checkmark"></span>
-        </label>
-
-        <div class="q-content">
-          <div class="q-tags">
-            <span class="tag-subject">{{ q.subject }}</span>
-            <span class="tag-year">{{ q.exam_year }}</span>
-            <span class="tag-answer">解答: {{ q.answer }}</span>
-          </div>
-          <h3 class="q-text">{{ q.question_text }}</h3>
+      <!-- 👇 這是動態長出來的科目 -->
+      <NuxtLink v-for="course in customCourses" :key="course.id" :to="`/admin/law-exam/custom-course/${course.subject}`" class="dash-card course-card dynamic-theme" :style="{ '--theme-color': course.theme_color }">
+        <div class="icon">{{ course.icon }}</div>
+        <div class="course-info">
+          <span class="course-tag dynamic-tag" :style="{ backgroundColor: course.theme_color }">自訂</span>
+          <h2>{{ course.subject }}</h2>
         </div>
-        <div class="q-actions">
-          <button @click="openEditModal(q)" class="btn-small btn-edit">編輯</button>
-          <button @click="deleteQuestion(q.id)" class="btn-small btn-delete">刪除</button>
+        <!-- 🌟 動態卡片的編輯與刪除按鈕 (滑鼠移過去才會出現) -->
+        <div class="card-admin-actions">
+           <button @click.prevent="editCourse(course)" class="action-btn" title="編輯科目">✏️</button>
+           <button @click.prevent="deleteCourse(course.id, course.subject)" class="action-btn" title="刪除專區">🗑️</button>
         </div>
-      </div>
+      </NuxtLink>
     </div>
 
-    <div v-if="showEditModal" class="modal-overlay">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h2>{{ editingQ.id ? '編輯司律題目' : '新增司律題目' }}</h2>
-          <button class="close-btn" @click="showEditModal = false">✕</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group row">
-            <div class="col">
-              <label>科目名稱</label>
-              <input v-model="editingQ.subject" type="text" placeholder="如：民法" />
-            </div>
-            <div class="col">
-              <label>年份/來源</label>
-              <input v-model="editingQ.exam_year" type="text" placeholder="如：112 司律" />
-            </div>
-          </div>
-          <div class="form-group">
-            <label>題目內文</label>
-            <textarea v-model="editingQ.question_text" rows="4"></textarea>
-          </div>
-          <div class="options-section">
-            <div v-for="letter in ['a', 'b', 'c', 'd']" :key="letter" class="option-card" :class="{ active: editingQ.answer === letter.toUpperCase() }">
-              <div class="opt-header">
-                <span class="opt-letter">{{ letter.toUpperCase() }}</span>
-                <input v-model="editingQ['opt_' + letter]" type="text" class="opt-input" placeholder="請輸入選項內容" />
-                <label class="radio-label">
-                  <input type="radio" v-model="editingQ.answer" :value="letter.toUpperCase()" />
-                  正確解答
-                </label>
-              </div>
-              <div class="exp-area">
-                <label>詳解文字</label>
-                <textarea v-model="editingQ['exp_' + letter + '_text']" rows="2" placeholder="請輸入解析..."></textarea>
-                <label>參考網址</label>
-                <input v-model="editingQ['exp_' + letter + '_url']" type="url" placeholder="https://..." />
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button @click="showEditModal = false" class="btn btn-outline">取消</button>
-          <button @click="saveQuestion" class="btn btn-primary">儲存題庫資料</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <style scoped>
-.law-admin-container { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 20px 40px; background: #f4f6f8; min-height: 100vh; color: #333; }
-.header-section { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 20px; }
-.title-area h1 { margin: 0; font-size: 28px; color: #1e293b; }
-.title-area p { margin: 5px 0 0 0; color: #64748b; font-size: 14px; }
-.action-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+/* 舊有樣式不變 */
+.dashboard-container { font-family: sans-serif; max-width: 1100px; margin: 0 auto; padding: 40px 20px; }
+.header { text-align: center; margin-bottom: 40px; }
+.back-btn { color: #64748b; text-decoration: none; font-weight: bold; background: white; padding: 6px 16px; border-radius: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: inline-block; margin-bottom: 20px; transition: 0.2s;}
+.back-btn:hover { background: #f1f5f9; color: #1e293b;}
+.header h1 { font-size: 32px; color: #1e293b; margin: 0 0 10px 0;}
+.header p { color: #64748b; font-size: 16px; margin: 0;}
+.section-title { font-size: 20px; color: #334155; margin: 0 0 15px 5px; font-weight: 900;}
+.section-divider { border: none; border-top: 1px dashed #cbd5e1; margin: 30px 0; }
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; }
+.dash-card { display: flex; flex-direction: column; justify-content: center; align-items: center; text-decoration: none; background: white; padding: 25px 15px; border-radius: 16px; text-align: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 2px solid transparent; transition: all 0.2s; }
+.dash-card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+.icon { font-size: 36px; margin-bottom: 12px; transition: transform 0.2s; }
+.dash-card:hover .icon { transform: scale(1.1); }
+.dash-card h2 { color: #1e293b; font-size: 16px; margin: 0; font-weight: bold; line-height: 1.4;}
+.course-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.course-card { display: flex; flex-direction: row; justify-content: flex-start; align-items: center; gap: 15px; padding: 20px; background: #f8fafc; border: 2px solid #e2e8f0;}
+.course-card .icon { margin: 0; font-size: 42px;}
+.course-info { display: flex; flex-direction: column; align-items: flex-start; gap: 5px;}
+.course-tag { color: white; font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 4px; width: fit-content;}
 
-.filter-bar { display: flex; gap: 20px; align-items: center; background: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; border: 1px solid #e2e8f0; flex-wrap: wrap;}
-.filter-item { display: flex; align-items: center; gap: 8px; }
-.filter-item label { font-size: 14px; font-weight: bold; color: #64748b; }
-.styled-select { padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; color: #334155; background: #f8fafc; outline: none; cursor: pointer; }
-.styled-select:focus { border-color: #3b82f6; }
-.filter-info { margin-left: auto; font-size: 14px; font-weight: bold; color: #3b82f6; background: #eff6ff; padding: 6px 12px; border-radius: 6px; }
+/* 各種顏色 Tag 不變... */
+.tag-civil { background: #3b82f6; } .civil-theme:hover { border-color: #3b82f6; background: white;}
+.tag-criminal { background: #e11d48; } .criminal-theme:hover { border-color: #e11d48; background: white;}
+.tag-admin { background: #475569; } .admin-theme:hover { border-color: #475569; background: white;}
+.tag-cp { background: #d97706; } .cp-theme:hover { border-color: #d97706; background: white;}
+.tag-crp { background: #059669; } .crp-theme:hover { border-color: #059669; background: white;}
+.tag-comm { background: #0f766e; } .comm-theme:hover { border-color: #0f766e; background: white;}
+.tag-ip { background: #7c3aed; } .ip-theme:hover { border-color: #7c3aed; background: white;}
+.practice-card:hover { border-color: #3b82f6; }
+.manage-card:hover { border-color: #10b981; }
 
-/* 🌟 Checkbox 樣式美化 */
-.checkbox-container { display: flex; align-items: center; position: relative; cursor: pointer; font-size: 14px; font-weight: bold; color: #475569; user-select: none; gap: 10px; padding-left: 30px;}
-.checkbox-container input { position: absolute; opacity: 0; cursor: pointer; height: 0; width: 0; }
-.checkmark { position: absolute; top: 50%; left: 0; transform: translateY(-50%); height: 22px; width: 22px; background-color: #e2e8f0; border-radius: 6px; transition: 0.2s;}
-.checkbox-container:hover input ~ .checkmark { background-color: #cbd5e1; }
-.checkbox-container input:checked ~ .checkmark { background-color: #3b82f6; }
-.checkmark:after { content: ""; position: absolute; display: none; }
-.checkbox-container input:checked ~ .checkmark:after { display: block; left: 8px; top: 4px; width: 5px; height: 10px; border: solid white; border-width: 0 3px 3px 0; transform: rotate(45deg); }
+.law-indigo:hover { border-color: #4f46e5; background: #eef2ff; } .law-rose:hover { border-color: #e11d48; background: #fff1f2; } .law-amber:hover { border-color: #d97706; background: #fffbeb; } .law-emerald:hover { border-color: #059669; background: #ecfdf5; } .law-violet:hover { border-color: #7c3aed; background: #f5f3ff; } .law-gray:hover { border-color: #374151; background: #f3f4f6; } .law-deep-purple:hover { border-color: #6d28d9; background: #ede9fe; } .law-rust:hover { border-color: #92400e; background: #fef3c7; } .law-marine:hover { border-color: #1e40af; background: #dbeafe; } .law-forest:hover { border-color: #065f46; background: #d1fae5; } .law-cyan:hover { border-color: #0891b2; background: #ecfeff; } .law-sky:hover { border-color: #0284c7; background: #f0f9ff; } .law-pink:hover { border-color: #ec4899; background: #fdf2f8; } .law-teal:hover { border-color: #14b8a6; background: #f0fdfa; } .law-orange:hover { border-color: #ea580c; background: #fff7ed; }
+.tag-emerald { background: #10b981; } .emerald-theme:hover { border-color: #10b981; background: white;}
+.tag-amber { background: #f59e0b; } .amber-theme:hover { border-color: #f59e0b; background: white;}
+.tag-rose { background: #e11d48; } .rose-theme:hover { border-color: #e11d48; background: white;}
+.tag-indigo { background: #6366f1; } .indigo-theme:hover { border-color: #6366f1; background: white;}
+.tag-cyan { background: #0891b2; } .cyan-theme:hover { border-color: #0891b2; background: white;}
+.tag-violet { background: #8b5cf6; } .violet-theme:hover { border-color: #8b5cf6; background: white;}
 
-.select-all-btn { padding: 8px 12px 8px 40px; background: #f8fafc; border-radius: 8px; border: 1px solid #cbd5e1; }
-.select-all-btn:hover { background: #f1f5f9; }
-.item-checkbox { padding-left: 22px; margin-right: 15px;}
+/* 🌟 動態新增功能專屬 CSS */
+.btn-toggle-add { background: #1e293b; color: white; border: none; padding: 6px 14px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s;}
+.btn-toggle-add:hover { background: #334155; }
+.add-course-panel { background: white; padding: 20px; border-radius: 12px; border: 1px dashed #cbd5e1; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);}
+.add-grid { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 15px; }
+.add-grid label { display: block; font-size: 13px; font-weight: bold; color: #475569; margin-bottom: 5px;}
+.add-input { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box;}
+.color-picker { width: 100%; height: 40px; border: none; border-radius: 8px; cursor: pointer; padding: 0;}
+.btn-confirm-add { background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; height: 40px;}
+.btn-confirm-add:hover { background: #059669; }
 
-.btn { padding: 10px 18px; border-radius: 8px; font-weight: bold; cursor: pointer; border: none; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-.btn:active { transform: scale(0.96); }
-.btn-primary { background: #3b82f6; color: white; }
-.btn-primary:hover { background: #2563eb; }
-.btn-warning { background: #f59e0b; color: white; }
-.btn-warning:hover { background: #d97706; }
-.btn-success { background: #10b981; color: white; }
-.btn-success:hover { background: #059669; }
-.btn-dark { background: #475569; color: white; }
-.btn-dark:hover { background: #334155; }
-.btn-danger { background: #ef4444; color: white; animation: fadeIn 0.2s; }
-.btn-danger:hover { background: #dc2626; }
-.btn-outline { background: white; border: 1px solid #cbd5e1; color: #475569; }
-.btn-outline:hover { background: #f8fafc; }
+/* 🌟 動態卡片懸浮按鈕 */
+.dynamic-theme { position: relative; }
+.card-admin-actions { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; opacity: 0; transition: opacity 0.2s ease-in-out; }
+.dynamic-theme:hover .card-admin-actions { opacity: 1; }
+.action-btn { background: white; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px; font-size: 14px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.action-btn:hover { background: #f1f5f9; transform: scale(1.1); border-color: #94a3b8;}
+.dynamic-theme:hover { border-color: var(--theme-color); background: white;}
 
-.btn-small { padding: 6px 12px; border-radius: 6px; font-weight: bold; border: none; cursor: pointer; font-size: 13px; }
-.btn-edit { background: #eff6ff; color: #2563eb; }
-.btn-edit:hover { background: #dbeafe; }
-.btn-delete { background: #fef2f2; color: #dc2626; }
-.btn-delete:hover { background: #fee2e2; }
-
-.question-list { display: flex; flex-direction: column; gap: 15px; }
-.q-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; border: 1px solid #e2e8f0; transition: 0.2s;}
-.q-card:hover { border-color: #cbd5e1; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-.q-card.is-selected { background: #f0fdf4; border-color: #86efac; } /* 選取時背景變淡綠色 */
-.q-content { flex: 1; padding-right: 20px; overflow: hidden; }
-.q-text { margin: 10px 0 0 0; font-size: 16px; font-weight: 500; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.q-tags { display: flex; gap: 8px; align-items: center; }
-.q-tags span { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
-.tag-subject { background: #e0e7ff; color: #4338ca; }
-.tag-year { background: #f1f5f9; color: #64748b; }
-.tag-answer { background: #dcfce3; color: #15803d; }
-.q-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.loading-msg, .empty-msg { text-align: center; padding: 40px; color: #64748b; background: white; border-radius: 12px; border: 2px dashed #cbd5e1; }
-
-.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.7); display: flex; justify-content: center; align-items: center; z-index: 100; padding: 20px; }
-.modal-content { background: white; border-radius: 16px; width: 100%; max-width: 800px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
-.modal-header { padding: 20px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-radius: 16px 16px 0 0; }
-.modal-header h2 { margin: 0; font-size: 20px; color: #1e293b; }
-.close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: #94a3b8; }
-.modal-body { padding: 24px; overflow-y: auto; flex: 1; }
-.modal-footer { padding: 16px 24px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 12px; background: #f8fafc; border-radius: 0 0 16px 16px; }
-.form-group { margin-bottom: 20px; }
-.form-group.row { display: flex; gap: 15px; }
-.form-group .col { flex: 1; }
-.modal-body label { display: block; font-size: 12px; font-weight: bold; color: #64748b; margin-bottom: 6px; }
-.modal-body input[type="text"], .modal-body input[type="url"], .modal-body textarea { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; font-family: inherit; font-size: 14px; box-sizing: border-box; }
-.modal-body input:focus, .modal-body textarea:focus { outline: none; border-color: #3b82f6; background: white; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
-
-.options-section { display: flex; flex-direction: column; gap: 15px; border-top: 2px dashed #e2e8f0; padding-top: 20px; }
-.option-card { border: 2px solid #e2e8f0; padding: 15px; border-radius: 12px; transition: all 0.2s; }
-.option-card.active { border-color: #3b82f6; background: #eff6ff; }
-.opt-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.opt-letter { background: #cbd5e1; color: white; width: 30px; height: 30px; display: flex; justify-content: center; align-items: center; border-radius: 6px; font-weight: bold; flex-shrink: 0; }
-.option-card.active .opt-letter { background: #3b82f6; }
-.opt-input { flex: 1; border: none !important; border-bottom: 1px solid #cbd5e1 !important; border-radius: 0 !important; background: transparent !important; padding: 5px !important; }
-.radio-label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: bold; cursor: pointer; color: #64748b; margin: 0; }
-.option-card.active .radio-label { color: #2563eb; }
-.exp-area { background: rgba(255,255,255,0.6); padding: 12px; border-radius: 8px; border: 1px dashed #cbd5e1; }
-.exp-area label { font-size: 10px; margin-top: 8px; }
-.exp-area label:first-child { margin-top: 0; }
-
-@keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+@media (max-width: 768px) { 
+  .cards-grid { grid-template-columns: 1fr 1fr; }
+  .cards-grid > .dash-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .course-grid { grid-template-columns: 1fr; }
+  .course-grid > .dash-card:last-child:nth-child(odd) { grid-column: auto; }
+  .add-grid { grid-template-columns: 1fr; }
+  .card-admin-actions { opacity: 1; } /* 手機版常駐顯示按鈕 */
+}
+@media (max-width: 500px) {
+  .dashboard-container { padding: 20px 15px; }
+  .cards-grid { grid-template-columns: 1fr; }
+  .cards-grid > .dash-card:last-child:nth-child(odd) { grid-column: auto; }
+  .dash-card { padding: 20px 15px; }
+  .icon { font-size: 30px; margin-bottom: 8px; }
+  .dash-card h2 { font-size: 15px; }
+}
 </style>

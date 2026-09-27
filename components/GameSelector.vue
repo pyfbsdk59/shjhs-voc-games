@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, onUnmounted } from 'vue';
+import { ref, onMounted, computed, onUnmounted, watch } from 'vue';
 
 const props = defineProps({ autoLogoutMinutes: { type: Number, default: 10 } });
 const supabase = useSupabaseClient();
@@ -13,6 +13,11 @@ const selectedUnit = ref('');
 const errorMsg = ref('');
 const isLoading = ref(false);
 let idleTimer = null;
+
+// 🌟 監聽範圍選擇變更，並即時記憶到瀏覽器的 LocalStorage 中
+watch(selectedVersion, (val) => { if (typeof window !== 'undefined') localStorage.setItem('shjhs_selectedVersion', val || ''); });
+watch(selectedVolume, (val) => { if (typeof window !== 'undefined') localStorage.setItem('shjhs_selectedVolume', val || ''); });
+watch(selectedUnit, (val) => { if (typeof window !== 'undefined') localStorage.setItem('shjhs_selectedUnit', val || ''); });
 
 const gameDict = {
   'match': { name: '🟦 方塊消消樂', path: '/game', class: '' },
@@ -54,25 +59,39 @@ const gameDict = {
   'examRead2': { name: '📜 會考閱讀考古學(題組)', path: '/game-examRead2', class: 'exam-btn full-width' },
   'gramAmuPark': { name: '🎡 文法遊樂園', path: '/game-gramAmuPark', class: 'exam-btn full-width' },
   'noropejump': { name: '🏃‍♂️ 單字無繩式跳繩', path: '/game-noropejump', class: 'exam-btn full-width' },
-  
-  // ✨ 已修正：改為單字飛鼠射擊，並更換 ID 與樣式
   'vocshooting': { name: '🔫 單字飛鼠射擊', path: '/game-vocshooting', class: 'shooting-btn full-width' },
-
   'battle': { name: '⚔️ 單字方塊陣', path: '/game-battle', class: 'battle-btn full-width', pvpKey: 'enable_battle' },
   'tenchi': { name: '🐎 吞食天地', path: '/game-tenchi', class: 'tenchi-btn', pvpKey: 'enable_tenchi' },
   'tarot21': { name: '🃏 塔羅 21 點', path: '/game-tarot21', class: 'tarot-btn', pvpKey: 'enable_tarot21' },
   'tarotAlch': { name: '🔮 塔羅鍊金術', path: '/game-tarotAlch', class: 'tarot-btn', pvpKey: 'enable_tarot_alch' },
-  'tarotUno': { name: '🃏 塔羅 UNO', path: '/game-tarotUno', class: 'tarot-btn', pvpKey: 'enable_tarot_uno' }
+  'tarotUno': { name: '🃏 塔羅 UNO', path: '/game-tarotUno', class: 'tarot-btn', pvpKey: 'enable_tarot_uno' },
+  'verbing': { name: '🌀 動詞變化大師', path: '/game-verbing', class: 'exam-btn full-width' },
+  'verbingDual': { name: '⚔️ 動詞變化大師(對戰)', path: '/game-verbingDual', class: 'battle-btn full-width', pvpKey: 'enable_verbingDual' },
+  'verbAmuPark': { name: '🎢 動詞變化遊樂園', path: '/game-verbAmuPark', class: 'exam-btn full-width' },
+  
+  // 🌟 單字例句總複習
+  'vocReviewing': { name: '📖 單字例句總複習', path: '/game-vocReviewing', class: 'picture2meaning-btn full-width' }
 };
 
-const noUnitGames = ['speakno1', 'speakno2', 'speakno3', 'KKphonetics', 'Phonics', 'examRead1', 'examRead2'];
+const noUnitGames = ['speakno1', 'speakno2', 'speakno3', 'KKphonetics', 'Phonics', 'examRead1', 'examRead2', 'verbing', 'verbingDual', 'verbAmuPark'];
 const isNoUnitGame = computed(() => noUnitGames.includes(selectedGameType.value));
 
-const dynamicCategories = ref([]);
+const defaultCategories = [
+  { id: 'c1', name: '🕹️ 經典單字遊戲', games: ['match', 'move', 'choice', 'fill', 'sentence', 'listen', 'puzzle', 'cross', 'review', 'picture2meaning', 'ninja'] },
+  { id: 'c2', name: '🏆 體感與趣味挑戰', games: ['shake2shuffle', 'tilt2sort', 'gravitymaze', 'swing2cast', 'ARsniper', 'GPSmap', 'vocshooting', 'noropejump'] },
+  { id: 'c3', name: '👾 懷舊街機遊樂場', games: ['tetris', 'pinball', 'angrybirds', 'solitaire', 'pikavolley', 'pacman', 'minesweeper', 'sudoku'] },
+  { id: 'c4', name: '⚔️ 雙人對戰與領域牌組', games: ['battle', 'tenchi', 'tarot21', 'tarotAlch', 'tarotUno', 'tarotUno1', 'tarot21solo', 'tarotAlch1'] },
+  // 🌟 將總複習加入此分類
+  { id: 'c5', name: '🎓 考試與口說訓練', games: ['speak', 'speakno1', 'speakno2', 'speakno3', 'KKphonetics', 'Phonics', 'examListen1', 'examRead1', 'examRead2', 'gramAmuPark', 'verbing', 'verbAmuPark', 'vocReviewing'] }
+];
+
+const dynamicCategories = ref([...defaultCategories]);
 const pvpStatus = ref({});
 const accessSettings = ref({
   disabled_games: [], locked_units: [], restrict_play_time: false, allow_play_days: [1,2,3,4,5,6,0], allow_play_start: '00:00', allow_play_end: '23:59'
 });
+
+const studentAllowedGames = ref(['ALL']);
 
 onMounted(async () => {
   const { data: vData } = await supabase.from('vocabularies').select('version, volume, unit').limit(10000);
@@ -80,17 +99,49 @@ onMounted(async () => {
     const uniqueMenu = [];
     vData.forEach(item => { if (!uniqueMenu.find(u => u.version === item.version && u.volume === item.volume && u.unit === item.unit)) uniqueMenu.push(item); });
     vocabMenu.value = uniqueMenu;
+
+    if (typeof window !== 'undefined') {
+      const savedVersion = localStorage.getItem('shjhs_selectedVersion');
+      const savedVolume = localStorage.getItem('shjhs_selectedVolume');
+      const savedUnit = localStorage.getItem('shjhs_selectedUnit');
+
+      if (savedVersion && uniqueMenu.some(item => item.version === savedVersion)) {
+        selectedVersion.value = savedVersion;
+      }
+      if (savedVolume && uniqueMenu.some(item => item.version === savedVersion && item.volume === savedVolume)) {
+        selectedVolume.value = savedVolume;
+      }
+      if (savedUnit && uniqueMenu.some(item => item.version === savedVersion && item.volume === savedVolume && item.unit === savedUnit)) {
+        selectedUnit.value = savedUnit;
+      }
+    }
   }
   
   const { data: settings } = await supabase.from('system_settings').select('*').eq('id', 1).single();
   if (settings) {
-    if (settings.game_categories) {
-      dynamicCategories.value = settings.game_categories;
-      
-      // ✨ 已修正：自動將飛鼠射擊加入選單，確保學生看得到
+    if (settings.disable_anon_login === true && studentCookie.value && studentCookie.value.isAnon) {
+      alert('⚠️ 老師已關閉匿名登入功能！系統將強制為您登出，請使用正確的班級座號登入。');
+      handleLogout();
+      return; 
+    }
+
+    if (settings.game_categories && settings.game_categories.length > 0) {
+      dynamicCategories.value = settings.game_categories.map((c, i) => ({
+        id: c.id || `cat_${i}`,
+        name: c.name || c.category_name || `分類 ${i+1}`,
+        games: c.games || []
+      }));
       const hasShooting = dynamicCategories.value.some(cat => cat.games.includes('vocshooting'));
       if (!hasShooting && dynamicCategories.value.length > 0) {
         dynamicCategories.value[0].games.push('vocshooting');
+      }
+      const hasVerbing = dynamicCategories.value.some(cat => cat.games.includes('verbing'));
+      const hasVerbAmuPark = dynamicCategories.value.some(cat => cat.games.includes('verbAmuPark'));
+      const hasVocReviewing = dynamicCategories.value.some(cat => cat.games.includes('vocReviewing'));
+      if (dynamicCategories.value.length > 0) {
+        if (!hasVerbing) dynamicCategories.value[dynamicCategories.value.length - 1].games.push('verbing');
+        if (!hasVerbAmuPark) dynamicCategories.value[dynamicCategories.value.length - 1].games.push('verbAmuPark');
+        if (!hasVocReviewing) dynamicCategories.value[dynamicCategories.value.length - 1].games.push('vocReviewing');
       }
     }
     
@@ -99,7 +150,8 @@ onMounted(async () => {
       enable_tenchi: settings.enable_tenchi === true,
       enable_tarot21: settings.enable_tarot21 === true,
       enable_tarot_alch: settings.enable_tarot_alch === true,
-      enable_tarot_uno: settings.enable_tarot_uno === true
+      enable_tarot_uno: settings.enable_tarot_uno === true,
+      enable_verbingDual: settings.enable_verbingDual !== false, 
     };
     accessSettings.value = {
       disabled_games: settings.disabled_games || [],
@@ -110,6 +162,31 @@ onMounted(async () => {
       allow_play_end: settings.allow_play_end ? settings.allow_play_end.substring(0,5) : '23:59'
     };
   }
+
+  if (studentCookie.value && !studentCookie.value.isAnon) {
+    const { data: stuData } = await supabase.from('students')
+      .select('allowed_games')
+      .eq('student_id', studentCookie.value.id) 
+      .single();
+      
+    if (stuData && stuData.allowed_games) {
+      studentAllowedGames.value = stuData.allowed_games;
+    }
+  }
+
+  setTimeout(() => {
+    if (checkGameDisabled(selectedGameType.value)) {
+       for (const cat of dynamicCategories.value) {
+         for (const gId of cat.games) {
+           if (!checkGameDisabled(gId)) {
+             selectedGameType.value = gId;
+             return;
+           }
+         }
+       }
+    }
+  }, 200);
+
   setupIdleTracking(); resetIdleTimer();
 });
 
@@ -145,15 +222,26 @@ const isUnitLocked = computed(() => {
 });
 
 const checkGameDisabled = (gameId) => {
-    if (accessSettings.value.disabled_games.includes(gameId)) return true;
+    if (accessSettings.value.disabled_games?.includes(gameId)) return true;
     const gData = gameDict[gameId];
-    if (gData && gData.pvpKey && !pvpStatus.value[gData.pvpKey]) return true;
+    if (gData && gData.pvpKey && pvpStatus.value) { if (pvpStatus.value[gData.pvpKey] === false) return true; }
+    if (studentAllowedGames.value && !studentAllowedGames.value.includes('ALL')) {
+        if (!studentAllowedGames.value.includes(gameId)) return true; 
+    }
     return false;
 };
 
 const handleStartGame = async () => {
   if (!isTimeAllowed.value) { errorMsg.value = '⚠️ 目前非開放遊玩時段！'; return; }
-  if (checkGameDisabled(selectedGameType.value)) { errorMsg.value = '⚠️ 此遊戲目前維護中，已被禁用！'; return; }
+  
+  if (checkGameDisabled(selectedGameType.value)) { 
+      if (!studentAllowedGames.value.includes('ALL') && !studentAllowedGames.value.includes(selectedGameType.value)) {
+          errorMsg.value = '⚠️ 老師目前沒有開放這個遊戲給您玩喔！'; 
+      } else {
+          errorMsg.value = '⚠️ 此遊戲目前全校維護中，已被禁用！'; 
+      }
+      return; 
+  }
 
   if (isNoUnitGame.value) {
     isLoading.value = true;
@@ -187,9 +275,12 @@ onUnmounted(() => removeIdleTracking());
         <span v-else>👤 {{ studentCookie.class }} - {{ studentCookie.name }}</span>
       </p>
       
-      <div class="user-actions" style="display: flex; justify-content: center; gap: 15px; margin-top: 15px;">
-        <NuxtLink to="/student-grammar-stats" class="retro-btn stats-btn" style="background: #3f51b5; color: white; border-color: #1a237e; text-decoration: none;">
+      <div class="user-actions" style="display: flex; justify-content: center; gap: 15px; margin-top: 15px; flex-wrap: wrap;">
+        <NuxtLink v-if="!studentCookie.isAnon" to="/student-grammar-stats" class="retro-btn stats-btn" style="background: #3f51b5; color: white; border-color: #1a237e; text-decoration: none;">
           📊 我的文法診斷簿
+        </NuxtLink>
+        <NuxtLink v-if="!studentCookie.isAnon" to="/student-verb-stats" class="retro-btn stats-btn" style="background: #e3f2fd; color: #0d47a1; border-color: #1976d2; text-decoration: none;">
+          📊 動詞變化診斷簿
         </NuxtLink>
         <button class="retro-btn logout-btn" @click="handleLogout">🚪 登出帳號</button>
       </div>
@@ -277,9 +368,7 @@ onUnmounted(() => removeIdleTracking());
 .start-btn { background: var(--btn-primary-bg); color: var(--btn-primary-text); }
 .retro-btn:active:not(:disabled) { transform: var(--transform-active); box-shadow: var(--shadow-btn-active); }
 .error-msg { background: var(--danger-bg); border: 2px dashed var(--danger-color); color: var(--danger-color); margin-top: 15px; font-weight: 900; padding: 10px; text-align: center; border-radius: var(--radius-element); }
-@media (max-width: 600px) { .game-type-tabs { flex-direction: column; } .type-btn { min-width: 100%; } }
 
-/* 其他遊戲按鈕顏色... */
 .shake-btn { background: #fffde7; color: #e65100; border-color: #ffb300; }
 .shake-btn.active { background: #e65100; color: #fff; box-shadow: 0 4px 0 #bf360c; border-color: #bf360c; }
 .tilt-btn { background: #e0f2f1; color: #00796b; border-color: #4db6ac; }
@@ -292,8 +381,8 @@ onUnmounted(() => removeIdleTracking());
 .sniper-btn.active { background: #2e7d32; color: #fff; box-shadow: 0 4px 0 #1b5e20; border-color: #1b5e20; }
 .gps-btn { background: #e8f5e9; color: #2e7d32; border-color: #4caf50; }
 .gps-btn.active { background: #2e7d32; color: #fff; box-shadow: 0 4px 0 #1b5e20; border-color: #1b5e20; }
-
-/* ✨ 已修正：飛鼠射擊專屬按鈕色系 (藍底白字) */
 .shooting-btn { background: #e3f2fd; color: #1565c0; border-color: #1e88e5; }
 .shooting-btn.active { background: #1565c0; color: #fff; box-shadow: 0 4px 0 #0d47a1; border-color: #0d47a1; }
+
+@media (max-width: 600px) { .game-type-tabs { flex-direction: column; } .type-btn { min-width: 100%; } }
 </style>

@@ -17,8 +17,7 @@ const rankedList = ref([]);
 const pvpSortMode = ref('wins'); 
 const tetrisSortMode = ref('word'); 
 
-// 🌟 統一定義所有 PvP 對戰遊戲
-const pvpGames = ['單字方塊陣', '單字吞食天地', '單字塔羅21點', '單字塔羅鍊金術', '單字塔羅UNO對決'];
+const pvpGames = ['單字方塊陣', '單字吞食天地', '單字塔羅21點', '單字塔羅鍊金術', '單字塔羅UNO對決', '動詞對戰大師'];
 
 onMounted(async () => {
   const { data: sData } = await supabase.from('students').select('student_id, class_name, hidden_name').limit(10000);
@@ -40,20 +39,25 @@ const onVersionChange = () => { selectedVolume.value = ''; selectedUnit.value = 
 const onVolumeChange = () => { selectedUnit.value = ''; rankedList.value = []; };
 
 const fetchLeaderboard = async () => {
-  if (!selectedUnit.value) return;
+  const isVerbingGame = selectedGameType.value === '動詞變化大師' || selectedGameType.value === '動詞對戰大師';
+  if (!isVerbingGame && !selectedUnit.value) return;
   isLoading.value = true;
 
-  // 🌟 修正點：分開處理 query，避免帶有括號 () 的遊戲名稱破壞 Supabase 的 or 語法
-  let query = supabase.from('game_records').select('*')
-    .eq('version', selectedVersion.value)
-    .eq('volume', selectedVolume.value)
-    .eq('unit_played', selectedUnit.value)
-    .limit(10000); 
+  let query = supabase.from('game_records').select('*').limit(10000); 
 
-  if (selectedGameType.value === '單字方塊消消樂') {
-    query = query.or('game_type.eq.單字方塊消消樂,game_type.is.null');
-  } else {
+  if (isVerbingGame) {
     query = query.eq('game_type', selectedGameType.value);
+  } else {
+    query = query
+      .eq('version', selectedVersion.value)
+      .eq('volume', selectedVolume.value)
+      .eq('unit_played', selectedUnit.value);
+
+    if (selectedGameType.value === '單字方塊消消樂') {
+      query = query.or('game_type.eq.單字方塊消消樂,game_type.is.null');
+    } else {
+      query = query.eq('game_type', selectedGameType.value);
+    }
   }
 
   const { data } = await query;
@@ -167,7 +171,7 @@ const getPlayerName = (id) => {
     </div>
 
     <div class="filter-box retro-element">
-<div class="game-type-tabs">
+      <div class="game-type-tabs">
         <button class="type-btn" :class="{ active: selectedGameType === '單字方塊消消樂' }" @click="selectedGameType = '單字方塊消消樂'; fetchLeaderboard()">🟦 方塊</button>
         <button class="type-btn" :class="{ active: selectedGameType === '單字神移動' }" @click="selectedGameType = '單字神移動'; fetchLeaderboard()">🔠 移動</button>
         <button class="type-btn" :class="{ active: selectedGameType === '單字選選樂' }" @click="selectedGameType = '單字選選樂'; fetchLeaderboard()">✅ 選擇</button>
@@ -197,19 +201,18 @@ const getPlayerName = (id) => {
         <button class="type-btn" :class="{ active: selectedGameType === '單字皮卡丘排球' }" @click="selectedGameType = '單字皮卡丘排球'; fetchLeaderboard()">🏐 皮卡排球</button>
         <button class="type-btn" :class="{ active: selectedGameType === '單字彈珠台' }" @click="selectedGameType = '單字彈珠台'; fetchLeaderboard()">🎰 彈珠台</button>
         <button class="type-btn" :class="{ active: selectedGameType === '單字憤怒鳥' }" @click="selectedGameType = '單字憤怒鳥'; fetchLeaderboard()">🐦 憤怒鳥</button>
- <button class="type-btn" :class="{ active: selectedGameType === '單字看圖辨義' }" @click="selectedGameType = '單字看圖辨義'; fetchLeaderboard()">🖼️ 看圖辨義</button>
+        <button class="type-btn" :class="{ active: selectedGameType === '單字看圖辨義' }" @click="selectedGameType = '單字看圖辨義'; fetchLeaderboard()">🖼️ 看圖辨義</button>
         <button class="type-btn" :class="{ active: selectedGameType === '單字音節忍者' }" @click="selectedGameType = '單字音節忍者'; fetchLeaderboard()">🥷 音節忍者</button>
         <button class="type-btn" :class="{ active: selectedGameType === '英語口說學霸' }" @click="selectedGameType = '英語口說學霸'; fetchLeaderboard()">🗣️ 口說學霸</button>
         <button class="type-btn" :class="{ active: selectedGameType === '仿會考辨識句意' }" @click="selectedGameType = '仿會考辨識句意'; fetchLeaderboard()">💯 會考聽力</button>     
-
-        
-         <button class="type-btn" :class="{ active: selectedGameType === '單字搖搖杯' }" @click="selectedGameType = '單字搖搖杯'; fetchLeaderboard()"">🧋 搖搖杯</button>
-        <button class="type-btn" :class="{ active: selectedGameType === '單字天平' }" @click="selectedGameType = '單字天平'; fetchLeaderboard()"">⚖️ 天平</button>
-        <button class="type-btn" :class="{ active: selectedGameType === '單字迷宮滾滾球' }" @click="selectedGameType = '單字迷宮滾滾球'; fetchLeaderboard()"">🔮 迷宮</button>
-        <button class="type-btn" :class="{ active: selectedGameType === '霍格華茲單字杖' }" @click="selectedGameType = '霍格華茲單字杖'; fetchLeaderboard()"">🪄 單字杖</button>
-        <button class="type-btn" :class="{ active: selectedGameType === 'AR實境單字狙擊手' }" @click="selectedGameType = 'AR實境單字狙擊手'; fetchLeaderboard()"">🔫 狙擊手</button>
-        <button class="type-btn" :class="{ active: selectedGameType === '單字地圖 GO' }" @click="selectedGameType = '單字地圖 GO'; fetchLeaderboard()"">🌍 地圖GO</button>
-       
+        <button class="type-btn" :class="{ active: selectedGameType === '單字搖搖杯' }" @click="selectedGameType = '單字搖搖杯'; fetchLeaderboard()">🧋 搖搖杯</button>
+        <button class="type-btn" :class="{ active: selectedGameType === '單字天平' }" @click="selectedGameType = '單字天平'; fetchLeaderboard()">⚖️ 天平</button>
+        <button class="type-btn" :class="{ active: selectedGameType === '單字迷宮滾滾球' }" @click="selectedGameType = '單字迷宮滾滾球'; fetchLeaderboard()">🔮 迷宮</button>
+        <button class="type-btn" :class="{ active: selectedGameType === '霍格華茲單字杖' }" @click="selectedGameType = '霍格華茲單字杖'; fetchLeaderboard()">🪄 單字杖</button>
+        <button class="type-btn" :class="{ active: selectedGameType === 'AR實境單字狙擊手' }" @click="selectedGameType = 'AR實境單字狙擊手'; fetchLeaderboard()">🔫 狙擊手</button>
+        <button class="type-btn" :class="{ active: selectedGameType === '單字地圖 GO' }" @click="selectedGameType = '單字地圖 GO'; fetchLeaderboard()">🌍 地圖GO</button>
+        <button class="type-btn" :class="{ active: selectedGameType === '動詞變化大師' }" @click="selectedGameType = '動詞變化大師'; fetchLeaderboard()">🌀 動詞變化大師</button>
+        <button class="type-btn" :class="{ active: selectedGameType === '動詞對戰大師' }" @click="selectedGameType = '動詞對戰大師'; fetchLeaderboard()">⚔️ 動詞對戰大師</button>
       </div>
 
       <div v-if="pvpGames.includes(selectedGameType)" class="sub-tabs">
@@ -229,9 +232,12 @@ const getPlayerName = (id) => {
         <button class="id-btn" :class="{active: identityMode === 'anon'}" @click="identityMode = 'anon'; fetchLeaderboard()">🕵️ 匿名榜</button>
       </div>
       <div class="form-group" style="margin-top: 15px;">
-        <select v-model="selectedVersion" @change="onVersionChange" class="retro-input"><option value="" disabled>版本...</option><option v-for="v in availableVersions" :key="v" :value="v">{{ v }}</option></select>
-        <select v-model="selectedVolume" @change="onVolumeChange" class="retro-input" :disabled="!selectedVersion"><option value="" disabled>冊數...</option><option v-for="vol in availableVolumes" :key="vol" :value="vol">{{ vol }}</option></select>
-        <select v-model="selectedUnit" @change="fetchLeaderboard" class="retro-input" :disabled="!selectedVolume"><option value="" disabled>單元...</option><option v-for="u in availableUnits" :key="u" :value="u">{{ u }}</option></select>
+        <template v-if="!['動詞變化大師', '動詞對戰大師'].includes(selectedGameType)">
+          <select v-model="selectedVersion" @change="onVersionChange" class="retro-input"><option value="" disabled>版本...</option><option v-for="v in availableVersions" :key="v" :value="v">{{ v }}</option></select>
+          <select v-model="selectedVolume" @change="onVolumeChange" class="retro-input" :disabled="!selectedVersion"><option value="" disabled>冊數...</option><option v-for="vol in availableVolumes" :key="vol" :value="vol">{{ vol }}</option></select>
+          <select v-model="selectedUnit" @change="fetchLeaderboard" class="retro-input" :disabled="!selectedVolume"><option value="" disabled>單元...</option><option v-for="u in availableUnits" :key="u" :value="u">{{ u }}</option></select>
+        </template>
+        <div v-else class="empty-msg retro-element" style="width: 100%; padding: 10px; margin: 0;">✨ 總表模式：無需選擇單元，直接顯示排行。</div>
       </div>
     </div>
 
@@ -241,9 +247,14 @@ const getPlayerName = (id) => {
     <div class="rank-list" v-if="rankedList.length > 0">
       <div class="rank-card retro-element" v-for="(record, index) in rankedList" :key="record.id" :class="{'top-1': index===0, 'top-2': index===1, 'top-3': index===2}">
         <div class="rank-number">#{{ index + 1 }}</div>
+        
+        <!-- 🌟 名次區塊增加遊玩模式標示 -->
         <div class="rank-info">
           <div class="player-name">{{ getPlayerName(record.student_id) }}</div>
-          <div class="attempt-badge" v-if="!pvpGames.includes(selectedGameType) && selectedGameType !== '單字俄羅斯方塊'">第 {{ record.attempt_number || 1 }} 次</div>
+          <div style="margin-top: 5px;">
+            <span class="attempt-badge" v-if="!pvpGames.includes(selectedGameType) && selectedGameType !== '單字俄羅斯方塊'">第 {{ record.attempt_number || 1 }} 次</span>
+            <span class="mode-badge" v-if="selectedGameType === '動詞變化大師'">🎯 {{ record.unit_played === '動詞變化總表' ? '經典模式' : record.unit_played }}</span>
+          </div>
         </div>
         
         <div class="rank-score" v-if="pvpGames.includes(selectedGameType)">
@@ -325,7 +336,11 @@ const getPlayerName = (id) => {
 .rank-number { font-size: 1.8rem; font-weight: 900; color: var(--text-main); width: 50px; text-align: center; }
 .rank-info { flex: 1; padding: 0 10px; }
 .player-name { font-size: 1.1rem; font-weight: 900; color: var(--text-main); }
-.attempt-badge { background: var(--text-main); color: var(--box-bg); display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; margin: 5px 0 0 0; }
+.attempt-badge { background: var(--text-main); color: var(--box-bg); display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; margin: 0; }
+
+/* 🌟 動詞大師專屬模式標籤 */
+.mode-badge { background: #e3f2fd; color: #0d47a1; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; margin-left: 5px; border: 1px solid #1976d2; }
+
 .rank-score { text-align: right; min-width: 80px; }
 .rank-score strong { font-size: 1.5rem; }
 .rank-score small { font-weight: bold; display: block; margin-top: 5px;}

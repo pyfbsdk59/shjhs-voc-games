@@ -80,7 +80,6 @@ const checkAnswer = (selectedWord, event) => {
 };
 
 const startJumpingPhase = () => {
-  // 🌟 使用正確的欄位名稱 en_us
   const englishText = currentWord.value.en_us || '';
   const cleanWord = englishText.replace(/[^a-zA-Z]/g, '');
   
@@ -116,7 +115,6 @@ const handleMotion = (event) => {
   const delta = Math.abs(magnitude - lastMagnitude);
   lastMagnitude = magnitude;
   
-  // 變化大於 4.5 m/s² 視為跳躍
   if (delta > 4.5 && !isJumpingLock) {
     isJumpingLock = true; 
     const now = Date.now();
@@ -162,21 +160,49 @@ const endGame = async () => {
   gameState.value = 'end';
   window.removeEventListener('devicemotion', handleMotion);
   
-  await supabase.from('game_records').insert([{
-    student_id: studentCookie.value.id,
-    real_name: studentCookie.value.real_name || studentCookie.value.name,
-    class_name: studentCookie.value.class,
-    unit_played: `${version} ${volume}-${unit}`,
-    game_type: '單字無繩式跳繩',
-    score: score.value,
-    correct_words: `跳躍總數: ${totalJumpsDone.value} 下`, 
-    time_taken_seconds: 0,
-    is_anon: studentCookie.value.isAnon || false
-  }]);
-  
-  if (!studentCookie.value.isAnon) {
-    const { data } = await supabase.from('students').select('points').eq('id', studentCookie.value.id).single();
-    if (data) await supabase.from('students').update({ points: data.points + score.value }).eq('id', studentCookie.value.id);
+  if (studentCookie.value) {
+    let userIp = 'Unknown'; 
+    try { 
+      const response = await fetch('https://api.ipify.org?format=json');
+      const data = await response.json();
+      userIp = data.ip; 
+    } catch (e) {
+      console.log('無法取得 IP');
+    }
+
+    // 計算這是該單元的第幾次挑戰
+    const { count } = await supabase.from('game_records')
+      .select('*', { count: 'exact', head: true })
+      .eq('student_id', studentCookie.value.id)
+      .eq('unit_played', unit)
+      .eq('game_type', '單字無繩式跳繩');
+
+    const { error } = await supabase.from('game_records').insert([{
+      student_id: studentCookie.value.id,
+      version: version, 
+      volume: volume || '',
+      unit_played: unit,
+      game_type: '單字無繩式跳繩',
+      score: score.value,
+      correct_words: `跳躍總數: ${totalJumpsDone.value} 下`, 
+      time_taken_seconds: 0,
+      attempt_number: (count || 0) + 1,
+      ip_address: userIp,
+      device_info: navigator.userAgent
+    }]);
+
+    if (error) {
+      alert(`🚨 資料庫寫入失敗！請截圖給老師：\n${error.message}`);
+      console.error("寫入錯誤:", error);
+      return;
+    }
+    
+    if (!studentCookie.value.isAnon) {
+      const { data } = await supabase.from('students').select('points').eq('id', studentCookie.value.id).single();
+      if (data) {
+        await supabase.from('students').update({ points: data.points + score.value }).eq('id', studentCookie.value.id);
+      }
+    }
   }
 };
 
